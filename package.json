@@ -1,0 +1,8 @@
+{
+  "name": "hockey-radar",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Radar de hockey (NHL y ligas del mundo) con datos de AnnaBet.com",
+  "engines": { "node": ">=18" }
+}

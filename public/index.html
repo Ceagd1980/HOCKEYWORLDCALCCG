@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radar Hockey NHL</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏒</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Barlow+Semi+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0f1a26; --panel:#16263a; --line:#26405c; --text:#e8f1fa; --dim:#93a9c2;
+  --amber:#6fd3ff; --home:#39d0bd; --away:#ff8a7a; --win:#5fe08a; --loss:#ff6b6b;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.4 "Barlow Semi Condensed",system-ui,sans-serif;font-variant-numeric:tabular-nums}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;
+  padding:18px 20px 14px;border-bottom:2px solid var(--amber)}
+h1{margin:0;font:700 32px/1 Oswald,sans-serif;letter-spacing:.5px}
+h1 small{display:block;font:400 14px "Barlow Semi Condensed";color:var(--dim);letter-spacing:0;margin-top:4px}
+.controls{display:flex;gap:8px;align-items:center}
+input[type=date],button{font:600 15px "Barlow Semi Condensed";background:var(--panel);color:var(--text);
+  border:1px solid var(--line);border-radius:6px;padding:7px 10px}
+button{background:var(--amber);color:#1a1300;border-color:var(--amber);cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}
+:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+#status{padding:10px 20px;color:var(--dim);min-height:20px}
+#status.err{color:var(--loss)}
+#status.warn{color:var(--amber)}
+main{display:grid;grid-template-columns:repeat(auto-fill,minmax(370px,1fr));gap:14px;padding:4px 20px 24px}
+.game{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.meta{display:flex;justify-content:space-between;gap:8px;padding:7px 12px;font-size:13px;color:var(--dim);
+  border-bottom:1px solid var(--line)}
+.teams{padding:6px 12px}
+.team{display:grid;grid-template-columns:44px 1fr auto;align-items:center;gap:8px;padding:5px 0}
+.tag{font:700 11px Oswald;text-align:center;border-radius:4px;padding:2px 0}
+.tag.h{background:var(--home);color:#062521}.tag.a{background:var(--away);color:#2b0a06}
+.name{font:600 19px/1.1 Oswald,sans-serif}
+.name .rk{color:var(--amber);font-size:14px;margin-right:4px}
+.info{display:flex;gap:10px;font-size:14px;white-space:nowrap}
+.info .pos{color:var(--dim)}
+.W{color:var(--win);font-weight:700}.L{color:var(--loss);font-weight:700}
+.boxes{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 12px 10px}
+.box{border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+.box.h{border-top:3px solid var(--home)}.box.a{border-top:3px solid var(--away)}
+.box h3{margin:0 0 3px;font:600 13px "Barlow Semi Condensed";color:var(--dim)}
+.box table{width:100%;border-collapse:collapse;font-size:14px}
+.box td{padding:1px 0}.box td:last-child{text-align:right;font-weight:700;white-space:nowrap}
+.fb{color:var(--amber);cursor:help}
+.calc{background:#12202f;border-top:1px solid var(--line);padding:9px 12px 11px}
+.calc table{width:100%;border-collapse:collapse;font-size:14px}
+.calc th{font-weight:600;color:var(--dim);text-align:right;padding:2px 4px;font-size:12px}
+.calc th:first-child,.calc td:first-child{text-align:left}
+.calc td{padding:3px 4px;text-align:right;border-top:1px solid var(--line)}
+.score{font:700 16px Oswald}
+.score .h{color:var(--home)}.score .a{color:var(--away)}
+.line{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+.line b{font:700 20px Oswald;color:var(--amber)}
+.line span{color:var(--dim);font-size:13px}
+.sep{height:8px}
+input[type=search]{font:600 15px "Barlow Semi Condensed";background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:7px 10px;width:220px}
+.chk{display:flex;align-items:center;gap:5px;color:var(--dim);font-size:14px;white-space:nowrap}
+.controls{flex-wrap:wrap}
+@media (max-width:520px){input[type=search]{width:100%}.team{grid-template-columns:44px 1fr}.team .info{grid-column:2;font-size:13px}}
+button.nav{background:var(--panel);color:var(--text);border-color:var(--line);padding:7px 9px}
+.pl{border-top:1px solid var(--line);padding:9px 10px 11px;overflow-x:auto}
+.pl h4{margin:0 0 4px;font:600 13px "Barlow Semi Condensed";color:var(--dim)}
+.pl table{width:100%;border-collapse:collapse;font-size:13px}
+.pl th{font-weight:600;color:var(--dim);font-size:11.5px;text-align:right;padding:2px 2px}
+.pl td{padding:2px 2px;text-align:right;border-top:1px solid var(--line)}
+.pl th:nth-child(-n+3),.pl td:nth-child(-n+3){text-align:left}
+.pl td:first-child{max-width:104px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl td:nth-child(2){color:var(--dim);font-size:12px}
+.pl td:nth-child(3){color:var(--dim);max-width:62px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl td.pra{color:var(--amber);font-weight:700}
+.pl td.none{max-width:none;white-space:normal}
+.pl tr.side td{border-top:0;padding-top:6px;font-weight:700;text-align:left}
+.pl tr.side.h td{color:var(--home)}.pl tr.side.a td{color:var(--away)}
+.pl .none{color:var(--dim);font-size:13px;text-align:left}
+.day{grid-column:1/-1;margin:10px 0 -4px;font:600 18px Oswald,sans-serif;color:var(--amber)}
+.empty{grid-column:1/-1;padding:40px 10px;text-align:center;color:var(--dim)}
+footer{padding:0 20px 28px;color:var(--dim);font-size:13px;max-width:900px}
+footer p{margin:4px 0}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+details{padding:0 20px 10px;color:var(--dim);font-size:13px}
+@media (max-width:420px){.pl table{font-size:12px}.pl td:first-child{max-width:92px}main{grid-template-columns:1fr;padding:4px 10px 20px}header{padding:14px 12px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+select{font:600 15px "Barlow Semi Condensed";background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:7px 8px;max-width:230px}
+.mini{width:100%;border-collapse:collapse;font-size:13.5px}
+.mini th{font-weight:600;color:var(--dim);font-size:12px;text-align:right;padding:1px 2px}
+.mini td{padding:1px 2px;text-align:right}
+.mini th:first-child,.mini td:first-child{text-align:left;color:var(--dim)}
+.mini td b{font-weight:700}
+.x2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+.pct{font:700 17px Oswald}
+.pct.h{color:var(--home)}.pct.a{color:var(--away)}.pct{white-space:nowrap}
+.fav{outline:2px solid var(--amber);outline-offset:-2px;border-radius:4px}
+.flame{font:700 14px Oswald;padding:1px 8px;border-radius:12px;background:#15344a;color:var(--amber);white-space:nowrap}
+.flame.hot{background:var(--amber);color:#1a1300}
+.game.hot{border-color:var(--amber)}
+.final{color:var(--text);font-weight:700}
+.odds{color:var(--dim)}
+.calc h4{margin:8px 0 3px;font:600 13px "Barlow Semi Condensed";color:var(--dim)}
+.calc h4:first-child{margin-top:0}
+.sub{color:var(--dim);font-size:12px}
+.scores{display:flex;gap:14px;justify-content:space-around;text-align:center;margin:0 0 6px;padding:5px 0;border:1px dashed var(--line);border-radius:6px}
+.finalbox{margin:0 12px 10px;padding:7px 9px;border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:6px;font-size:13.5px}
+.finalbox .ok{color:var(--win);font-weight:700}.finalbox .bad{color:var(--loss);font-weight:700}
+.prevnote{color:var(--amber)}
+.box .mini td:first-child{white-space:nowrap;padding-right:4px}
+.box .mini td{font-size:13px}
+.box .rc{font-size:11.5px;white-space:nowrap;letter-spacing:-.2px}
+.box{min-width:0}
+</style>
+</head>
+<body>
+<header>
+  <h1>Radar Hockey · NHL<small>NHL y ligas del mundo (AnnaBet): 1X2 en 60 min, ganador con prórroga, PPG, goles totales y hándicap</small></h1>
+  <div class="controls">
+    <label for="league" class="sr">Liga</label>
+    <select id="league"><option value="serie_6_NHL">NHL</option></select>
+    <label for="q" class="sr">Buscar equipo</label>
+    <input type="search" id="q" placeholder="Buscar equipo" autocomplete="off">
+    <label class="chk" title="Muestra solo los partidos donde el favorito tiene más de 55% de probabilidad de ganar (incluye prórroga), ordenados de mayor a menor confianza"><input type="checkbox" id="hot"> 🔥 +55%</label>
+    <button id="prev" class="nav" type="button" aria-label="Fecha anterior con partidos">◀</button>
+    <label for="date" class="sr">Fecha</label>
+    <input type="date" id="date">
+    <button id="next" class="nav" type="button" aria-label="Fecha siguiente con partidos">▶</button>
+    <button id="load">Actualizar</button>
+  </div>
+</header>
+<div id="status" role="status" aria-live="polite"></div>
+<details id="warnbox" hidden><summary>Avisos de datos</summary><ul id="warnlist"></ul></details>
+<main id="games"></main>
+<footer>
+  <p>Datos: AnnaBet.com (posiciones general, casa y fuera). El local se mide con su tabla general y su tabla en casa (LL); la visita con su tabla general y su tabla fuera (VV). Récord G-GP-PP-P = ganados en 60 min · ganados en prórroga/penales · perdidos en prórroga/penales · perdidos en 60 min. GF = goles a favor por partido, GC = goles en contra por partido.</p>
+  <p>% ganador: (ganados + ganados en prórroga) ÷ jugados. % 60': ganados en tiempo regular ÷ jugados. PPG: puntos ÷ jugados (puntos de la tabla de la liga).</p>
+  <p>1X2 (60 minutos): Local = (ganados local + perdidos visita) ÷ partidos de ambos. Empate = (partidos a prórroga del local + de la visita) ÷ partidos de ambos. Visita = (ganados visita + perdidos local) ÷ partidos de ambos. Ganador (con prórroga): Local = (ganados + ganados OT local + perdidos + perdidos OT visita) ÷ partidos de ambos; Visita al revés.</p>
+  <p>🔥 Confianza: probabilidad del favorito para ganar el partido (con prórroga), promedio entre General y LL/VV. Se ordenan de mayor a menor; el filtro 🔥 +55% deja solo los que pasan de 55%.</p>
+  <p>Goles: Cruzado → Local = (GF local + GC visita)/2, Visita = (GF visita + GC local)/2, Total = suma. Suma anotados → GF local + GF visita. Líneas de referencia 5.5 y 6.5.</p>
+  <p>Hándicap: A → GF local − GF visita. B local → GF local − GC visita. B visita → GF visita − GC local. Positivo = ese equipo es favorito por esa cantidad de goles (puck line ±1.5).</p>
+  <p>Inicio de temporada: si un equipo tiene menos de 5 partidos, el partido se calcula con la tabla de la temporada anterior (se indica en la tarjeta).</p>
+</footer>
+<script>
+const $ = (s) => document.querySelector(s);
+const pctTxt = (v) => (v == null || !isFinite(v) ? "—" : (v * 100).toFixed(1) + "%");
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const DAYS = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
+const MON = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+function isoOf(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+function dayTitle(iso) { const [y,m,d] = iso.split("-").map(Number); const dt = new Date(y, m-1, d); return `${DAYS[dt.getDay()]} ${d} ${MON[m-1]} ${y}`; }
+const LS = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+
+let DATA = null, PREV = null, FROM_CACHE = false, reqId = 0;
+
+// ---------- cálculos ----------
+const f2 = (v) => (v == null || !isFinite(v) ? "—" : v.toFixed(2));
+const signed2 = (d) => (d == null || !isFinite(d) ? "—" : (d > 0 ? "+" : "") + d.toFixed(2));
+const otg = (s) => (s.otw || 0) + (s.otl || 0) + (s.d || 0); // partidos que llegaron empatados al final de los 60'
+const winp = (s) => (s && s.gp ? (s.w + (s.otw || 0)) / s.gp : null);   // % ganador (con prórroga)
+const win60 = (s) => (s && s.gp ? s.w / s.gp : null);                  // % ganados en 60'
+const ppg = (s) => (s && s.gp && s.ppg != null ? s.ppg : null);
+// 1X2 en 60 minutos (la prórroga cuenta como empate)
+function x12(L, V) {
+  if (!L || !V || !L.gp || !V.gp) return null;
+  const n = L.gp + V.gp;
+  return { h: (L.w + V.l) / n, d: (otg(L) + otg(V)) / n, a: (V.w + L.l) / n };
+}
+// Ganador del partido (incluye prórroga y penales)
+function ml(L, V) {
+  if (!L || !V || !L.gp || !V.gp) return null;
+  const n = L.gp + V.gp;
+  return { h: (L.w + (L.otw || 0) + V.l + (V.otl || 0)) / n, a: (V.w + (V.otw || 0) + L.l + (L.otl || 0)) / n };
+}
+function goals(L, V) {
+  if (!L || !V || L.gf == null || L.ga == null || V.gf == null || V.ga == null) return null;
+  const hl = (L.gf + V.ga) / 2, av = (V.gf + L.ga) / 2;
+  return { hl, av, cross: hl + av, sumGF: L.gf + V.gf, hA: L.gf - V.gf, hBh: L.gf - V.ga, hBa: V.gf - L.ga };
+}
+// Marcador posible: en hockey no hay empate final; si queda igualado se marca "OT"
+function score(l, v) {
+  let a = Math.round(l), b = Math.round(v);
+  // si redondeado queda igual pero un lado proyecta claramente más, se le da el gol de ventaja
+  if (a === b && Math.abs(l - v) >= 0.2) { if (l > v) b = Math.min(Math.floor(v), a - 1); else a = Math.min(Math.floor(l), b - 1); }
+  return `<span class="score"><span class="h">${a}</span>–<span class="a">${b}</span></span>${a === b ? ' <span class="sub">→ OT</span>' : ""}`;
+}
+function hcText(d, who) {
+  if (d == null || !isFinite(d)) return "—";
+  if (Math.abs(d) < 0.05) return "Parejo";
+  const other = who === "Local" ? "Visita" : "Local";
+  return d > 0 ? `${who} −${d.toFixed(2)}` : `${other} −${(-d).toFixed(2)}`;
+}
+function puck(d) {
+  if (d == null || !isFinite(d)) return "";
+  const fav = d > 0 ? "Local" : "Visita";
+  return Math.abs(d) >= 1.5 ? `Puck line: ${fav} −1.5` : `Puck line: ${fav === "Local" ? "Visita" : "Local"} +1.5`;
+}
+const ou = (t) => (t == null ? "" : `<div class="sub">${t > 5.5 ? "Over" : "Under"} 5.5 · ${t > 6.5 ? "Over" : "Under"} 6.5</div>`);
+
+// ---------- tarjeta ----------
+const rec = (x) => (x ? `${x.w}-${x.otw || 0}-${x.otl || 0}-${x.l}${x.d ? ` (E ${x.d})` : ""}` : "—");
+function teamRow(name, side, g) {
+  const cls = side === "home" ? "h" : "a";
+  const pos = g ? `${g.pos}º` : "—";
+  return `<div class="team">
+    <span class="tag ${cls}">${side === "home" ? "LOCAL" : "VISITA"}</span>
+    <span class="name">${esc(name)}</span>
+    <span class="info"><span class="pos">${pos}</span><span>${pctTxt(winp(g))}</span>${g ? `<span class="sub">${rec(g)}</span>` : ""}</span>
+  </div>`;
+}
+function box(name, side, g, s) {
+  const cls = side === "home" ? "h" : "a";
+  const lab = side === "home" ? "Casa" : "Fuera";
+  const row = (t, a, b) => `<tr><td>${t}</td><td>${a}</td><td><b>${b}</b></td></tr>`;
+  return `<div class="box ${cls}"><h3>${esc(name)}</h3><table class="mini">
+    <tr><th></th><th>General</th><th>${lab}</th></tr>
+    ${row("PJ", g ? g.gp : "—", s ? s.gp : "—")}
+    ${row('<span title="Ganados 60\' - ganados prórroga - perdidos prórroga - perdidos 60\'">Récord</span>', `<span class="rc">${rec(g)}</span>`, `<span class="rc">${rec(s)}</span>`)}
+    ${row("% G", pctTxt(winp(g)), pctTxt(winp(s)))}
+    ${row("% G 60'", pctTxt(win60(g)), pctTxt(win60(s)))}
+    ${row("PPG", f2(ppg(g)), f2(ppg(s)))}
+    ${row("GF", f2(g && g.gf), f2(s && s.gf))}
+    ${row("GC", f2(g && g.ga), f2(s && s.ga))}
+  </table></div>`;
+}
+function calc(Lg, Ls, Vg, Vs) {
+  const xg = x12(Lg, Vg), xs = x12(Ls, Vs), mg = ml(Lg, Vg), ms = ml(Ls, Vs);
+  const tg = goals(Lg, Vg), ts = goals(Ls, Vs);
+  const best = (x, keys) => (x ? keys.reduce((m, k) => (x[k] > x[m] ? k : m), keys[0]) : null);
+  const pc = (x, k, keys = ["h", "d", "a"]) => x ? `<span class="pct ${k === "a" ? "a" : k === "h" ? "h" : ""}${best(x, keys) === k ? " fav" : ""}">${pctTxt(x[k])}</span>` : "—";
+  const main = ts || tg;
+  const lineHtml = main
+    ? `<div class="line"><div>Goles <b>${f2(main.cross)}</b></div><div>Hándicap <b>${hcText(main.hA, "Local")}</b></div></div>`
+    : `<div class="line"><span>Sin datos suficientes para la proyección</span></div>`;
+  // 3 marcadores exactos: General, LL/VV y el promedio de ambos
+  const avgT = tg && ts ? { hl: (tg.hl + ts.hl) / 2, av: (tg.av + ts.av) / 2 } : null;
+  const three = [tg && ["General", tg], ts && ["LL/VV", ts], avgT && ["Promedio", avgT]].filter(Boolean);
+  const two = (fn) => `<td>${tg ? fn(tg) : "—"}</td><td>${ts ? fn(ts) : "—"}</td>`;
+  const diff = (a, b) => (a != null && b != null ? signed2(a - b) : "—");
+  return `<div class="calc">${lineHtml}
+    ${three.length ? `<div class="scores">${three.map(([t, x]) => `<div><span class="sub">${t}</span><br>${score(x.hl, x.av)}</div>`).join("")}</div>` : ""}
+    <h4>Ganador del partido (incluye prórroga y penales)</h4>
+    <table><tr><th></th><th>Local</th><th>Visita</th></tr>
+      <tr><td>General</td><td>${pc(mg, "h", ["h", "a"])}</td><td>${pc(mg, "a", ["h", "a"])}</td></tr>
+      <tr><td>LL / VV</td><td>${pc(ms, "h", ["h", "a"])}</td><td>${pc(ms, "a", ["h", "a"])}</td></tr>
+    </table>
+    <h4>1X2 · 60 minutos (X = se va a prórroga)</h4>
+    <table><tr><th></th><th>1 Local</th><th>X Empate</th><th>2 Visita</th></tr>
+      <tr><td>General</td><td>${pc(xg, "h")}</td><td>${pc(xg, "d")}</td><td>${pc(xg, "a")}</td></tr>
+      <tr><td>LL / VV</td><td>${pc(xs, "h")}</td><td>${pc(xs, "d")}</td><td>${pc(xs, "a")}</td></tr>
+    </table>
+    <h4>PPG (puntos por partido)</h4>
+    <table><tr><th></th><th>Local</th><th>Visita</th><th>Diferencia</th></tr>
+      <tr><td>General</td><td>${f2(ppg(Lg))}</td><td>${f2(ppg(Vg))}</td><td>${diff(ppg(Lg), ppg(Vg))}</td></tr>
+      <tr><td>LL / VV</td><td>${f2(ppg(Ls))}</td><td>${f2(ppg(Vs))}</td><td>${diff(ppg(Ls), ppg(Vs))}</td></tr>
+    </table>
+    <h4>Promedio de goles por partido</h4>
+    <table><tr><th></th><th>GF local</th><th>GC local</th><th>GF visita</th><th>GC visita</th></tr>
+      <tr><td>General</td><td>${f2(Lg && Lg.gf)}</td><td>${f2(Lg && Lg.ga)}</td><td>${f2(Vg && Vg.gf)}</td><td>${f2(Vg && Vg.ga)}</td></tr>
+      <tr><td>LL / VV</td><td>${f2(Ls && Ls.gf)}</td><td>${f2(Ls && Ls.ga)}</td><td>${f2(Vs && Vs.gf)}</td><td>${f2(Vs && Vs.ga)}</td></tr>
+      <tr><td>Total partido</td><td colspan="2">${Lg && Lg.gf != null ? f2(Lg.gf + Lg.ga) : "—"} <span class="sub">(L gen.)</span></td><td colspan="2">${Vg && Vg.gf != null ? f2(Vg.gf + Vg.ga) : "—"} <span class="sub">(V gen.)</span></td></tr>
+    </table>
+    <h4>Goles totales (over / under)</h4>
+    <table><tr><th></th><th>General</th><th>LL / VV</th></tr>
+      <tr><td>Goles local (GF L + GC V)/2</td>${two((t) => f2(t.hl))}</tr>
+      <tr><td>Goles visita (GF V + GC L)/2</td>${two((t) => f2(t.av))}</tr>
+      <tr><td><b>Total cruzado</b></td>${two((t) => `<b>${f2(t.cross)}</b>${ou(t.cross)}`)}</tr>
+      <tr><td>Marcador posible</td>${two((t) => score(t.hl, t.av))}</tr>
+      <tr><td>Suma anotados (GF L + GF V)</td>${two((t) => f2(t.sumGF))}</tr>
+    </table>
+    <h4>Hándicap (spread de goles)</h4>
+    <table><tr><th></th><th>General</th><th>LL / VV</th></tr>
+      <tr><td>A · GF L − GF V</td>${two((t) => `${signed2(t.hA)}<div class="sub">${hcText(t.hA, "Local")}</div><div class="sub">${puck(t.hA)}</div>`)}</tr>
+      <tr><td>B local · GF L − GC V</td>${two((t) => `${signed2(t.hBh)}<div class="sub">${hcText(t.hBh, "Local")}</div>`)}</tr>
+      <tr><td>B visita · GF V − GC L</td>${two((t) => `${signed2(t.hBa)}<div class="sub">${hcText(t.hBa, "Visita")}</div>`)}</tr>
+    </table>
+  </div>`;
+}
+// Confianza 🔥: probabilidad del favorito de ganar el partido (con prórroga), promedio de General y LL/VV
+function confidence(Lg, Ls, Vg, Vs) {
+  const xs = [ml(Lg, Vg), ml(Ls, Vs)].filter(Boolean);
+  if (!xs.length) return null;
+  const h = xs.reduce((a, x) => a + x.h, 0) / xs.length, a = xs.reduce((a2, x) => a2 + x.a, 0) / xs.length;
+  return h >= a ? { side: "Local", p: h } : { side: "Visita", p: a };
+}
+const HOT = 0.55;
+
+// Resultado real vs. cálculos (partidos ya jugados)
+function finalBox(g, c, Lg, Ls, Vg, Vs) {
+  if (!g.score) return "";
+  const [h, a] = g.score;
+  const winner = h > a ? "Local" : a > h ? "Visita" : null;
+  const t = goals(Ls, Vs) || goals(Lg, Vg);
+  const tot = h + a;
+  const parts = [];
+  if (c && winner) parts.push(c.side === winner
+    ? `<span class="ok">✔ 🔥 acertó: ganó ${winner} (${(c.p * 100).toFixed(0)}%)</span>`
+    : `<span class="bad">✘ 🔥 falló: ganó ${winner}</span>`);
+  parts.push(`1X2 60': <b>${g.ot ? `X (empate, definido en ${g.ot === "SO" ? "penales" : "prórroga"})` : winner === "Local" ? "1 Local" : "2 Visita"}</b>`);
+  if (t) parts.push(`Goles reales <b>${tot}</b> vs proyectado ${f2(t.cross)} (${tot > t.cross ? "más" : "menos"}) · ${tot > 5.5 ? "Over" : "Under"} 5.5`);
+  parts.push(`Diferencia real: ${h - a > 0 ? "+" : ""}${h - a} local${t ? ` (proyectado ${signed2(t.hA)})` : ""}`);
+  return `<div class="finalbox">${parts.map((p) => `<div>${p}</div>`).join("")}</div>`;
+}
+
+// Tablas a usar en el partido: al inicio de temporada (menos de minGp partidos) se usa la temporada anterior
+function tablesFor(g) {
+  const S = DATA.standings || {};
+  const cur = [S.all?.[g.homeKey], (S.home || S.all)?.[g.homeKey], S.all?.[g.awayKey], (S.away || S.all)?.[g.awayKey]];
+  const min = DATA.minGp || 5;
+  const few = !cur[0] || !cur[2] || cur[0].gp < min || cur[2].gp < min;
+  if (few && PREV) {
+    const P = PREV.standings || {};
+    const hk = PREV.keyOf(g.homeKey, g.home), ak = PREV.keyOf(g.awayKey, g.away);
+    const pv = [P.all?.[hk], (P.home || P.all)?.[hk], P.all?.[ak], (P.away || P.all)?.[ak]];
+    if (pv[0] && pv[2]) return { t: pv, prev: true };
+  }
+  return { t: cur, prev: false };
+}
+
+// ---------- fechas ----------
+function gameDates() { return [...new Set((DATA?.games || []).map((g) => g.date).filter(Boolean))].sort(); }
+function pickDefaultDate() {
+  const ds = gameDates(), today = isoOf(new Date());
+  if (!ds.length) return today;
+  if (ds.includes(today)) return today;
+  return ds.find((d) => d > today) || ds[ds.length - 1];
+}
+function shift(dir) {
+  const ds = gameDates(), cur = $("#date").value || isoOf(new Date());
+  const nxt = dir > 0 ? ds.find((d) => d > cur) : [...ds].reverse().find((d) => d < cur);
+  if (nxt) { $("#date").value = nxt; render(); }
+}
+
+function render() {
+  if (!DATA) return;
+  const el = $("#games"), st = $("#status");
+  const day = $("#date").value;
+  const q = ($("#q").value || "").trim().toLowerCase();
+  const all = (DATA.games || []).filter((g) => g.date === day);
+  const onlyHot = $("#hot").checked;
+  for (const g of all) { g._tb = tablesFor(g); g._conf = confidence(...g._tb.t); }
+  // Los de mayor confianza primero
+  all.sort((a, b) => (b._conf?.p ?? -1) - (a._conf?.p ?? -1));
+  const list = all.filter((g) => (!q || (g.home + " " + g.away).toLowerCase().includes(q)) &&
+    (!onlyHot || (g._conf && g._conf.p > HOT)));
+  const ds = gameDates();
+  if (!all.length) {
+    const next = ds.find((d) => d > day), prev = [...ds].reverse().find((d) => d < day);
+    el.innerHTML = `<div class="empty">No hay partidos de ${esc(DATA.title)} el ${dayTitle(day)}.` +
+      (next ? ` Próxima fecha con partidos: <b>${dayTitle(next)}</b> (usa ▶).` : prev ? ` Última fecha con partidos: <b>${dayTitle(prev)}</b> (usa ◀).` : " AnnaBet no muestra partidos para esta liga ahora.") + `</div>`;
+  } else if (!list.length) {
+    el.innerHTML = onlyHot
+      ? `<div class="empty">Ningún partido de este día tiene un favorito con más de 55%. Desmarca 🔥 +55% para ver todos.</div>`
+      : `<div class="empty">Ningún partido coincide con la búsqueda.</div>`;
+  } else {
+    el.innerHTML = `<h2 class="day">${esc(DATA.title)} · ${dayTitle(day)}</h2>` + list.map((g) => {
+      const [Lg, Ls, Vg, Vs] = g._tb.t;
+      const fin = g.score ? `<span class="final">Final ${g.score[0]}–${g.score[1]}${g.ot ? ` ${g.ot}` : ""}</span>` : "";
+      const hc = g.hc != null ? ` · HC ${g.hc > 0 ? "+" : ""}${g.hc}` : "";
+      const odds = g.odds ? `<span class="odds" title="Cuotas 1 / X / 2 de AnnaBet">Cuotas ${g.odds.join(" · ")}${hc}</span>` : "";
+      const c = g._conf;
+      const hot = c && c.p > HOT;
+      const flame = c ? `<span class="flame${hot ? " hot" : ""}" title="Confianza: probabilidad del favorito de ganar (con prórroga), promedio General y LL/VV">🔥 ${c.side} ${(c.p * 100).toFixed(0)}%</span>` : "";
+      const prevNote = g._tb.prev ? `<div class="meta prevnote">📅 Inicio de temporada: calculado con la temporada ${esc(PREV.label)}</div>` : "";
+      return `<article class="game${hot ? " hot" : ""}">
+        <div class="meta"><span>${esc(g.time || "Hora por confirmar")} ${fin}</span>${flame}</div>
+        ${odds ? `<div class="meta">${odds}</div>` : ""}
+        ${prevNote}
+        <div class="teams">${teamRow(g.home, "home", Lg)}${teamRow(g.away, "away", Vg)}</div>
+        ${finalBox(g, c, Lg, Ls, Vg, Vs)}
+        <div class="boxes">${box(g.home, "home", Lg, Ls)}${box(g.away, "away", Vg, Vs)}</div>
+        ${calc(Lg, Ls, Vg, Vs)}
+      </article>`;
+    }).join("");
+  }
+  const when = new Date(DATA.updated).toLocaleString("es-EC");
+  const hidden = all.length - list.length;
+  st.className = FROM_CACHE ? "warn" : "";
+  st.textContent = FROM_CACHE
+    ? `No se pudo conectar con AnnaBet. Mostrando datos guardados del ${when}.`
+    : `${list.length} partido(s) · ${dayTitle(day)}${hidden ? ` (${hidden} ocultos por ${onlyHot ? "el filtro 🔥" : "la búsqueda"})` : ""} · ${ds.length} fecha(s) con partidos en la liga · actualizado ${when}`;
+  const w = DATA.warnings || [];
+  $("#warnbox").hidden = !w.length;
+  $("#warnlist").innerHTML = w.map((x) => `<li>${esc(x)}</li>`).join("");
+}
+
+// ---------- temporada anterior (inicio de temporada) ----------
+// Busca el equipo en la tabla anterior: por clave exacta o por nombre parecido (p. ej. cambio de nombre)
+function makePrev(data, label) {
+  const keys = new Set();
+  for (const m of [data.standings?.all, data.standings?.home, data.standings?.away]) for (const k of Object.keys(m || {})) keys.add(k);
+  const norm = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const keyOf = (k, name) => {
+    if (keys.has(k)) return k;
+    const n = norm(name);
+    const hits = [...keys].filter((x) => x.startsWith(n.slice(0, 5)) || n.startsWith(x.slice(0, 5)));
+    return hits.length === 1 ? hits[0] : null;
+  };
+  return { standings: data.standings, label, keyOf };
+}
+async function loadPrev(my) {
+  const p = DATA?.prevSeason;
+  if (!DATA?.early || !p) return;
+  const cacheKey = "hockey-radar:prev:" + p.id;
+  let data = null;
+  try {
+    const r = await fetch(`/api/hockey?part=standings&league=${encodeURIComponent(p.id)}`);
+    data = await r.json();
+    if (!r.ok || !data.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    LS.set(cacheKey, JSON.stringify(data));
+  } catch (e) {
+    try { data = JSON.parse(LS.get(cacheKey) || "null"); } catch {}
+    if (!data && DATA) (DATA.warnings ||= []).push(`No se pudo leer la temporada ${p.label}: ${e.message}. Pulsa Actualizar para reintentar.`);
+  }
+  if (my !== reqId) return;
+  if (data) PREV = makePrev(data, p.label);
+  render();
+}
+
+// ---------- carga ----------
+async function load(keepDate, retried) {
+  const league = $("#league").value;
+  const my = ++reqId;
+  const btn = $("#load");
+  btn.disabled = true; btn.textContent = "Cargando…";
+  const lname = $("#league").selectedOptions[0]?.textContent || league;
+  $("#status").className = ""; $("#status").textContent = `Cargando ${lname} desde AnnaBet…`;
+  if (!keepDate) { $("#games").innerHTML = `<div class="empty">Cargando ${esc(lname)}…</div>`; $("#warnbox").hidden = true; }
+  const cacheKey = "hockey-radar:" + league;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 25000);
+    const r = await fetch(`/api/hockey?league=${encodeURIComponent(league)}`, { signal: ctrl.signal });
+    clearTimeout(t);
+    let data;
+    try { data = await r.json(); } catch { throw new Error(`respuesta no válida (HTTP ${r.status})`); }
+    if (!r.ok || !data.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    if (my !== reqId) return;
+    LS.set(cacheKey, JSON.stringify(data));
+    DATA = data; FROM_CACHE = false;
+  } catch (e) {
+    if (my !== reqId) return;
+    // Un reintento automático: AnnaBet a veces tarda la primera vez
+    if (!retried) { $("#status").textContent = "AnnaBet tardó en responder, reintentando…"; await new Promise((r) => setTimeout(r, 1200)); if (my === reqId) return load(keepDate, true); return; }
+    let saved = null;
+    try { saved = JSON.parse(LS.get(cacheKey) || "null"); } catch {}
+    if (saved) { DATA = saved; FROM_CACHE = true; }
+    else {
+      DATA = null;
+      $("#games").innerHTML = "";
+      $("#warnbox").hidden = true;
+      $("#status").className = "err";
+      $("#status").textContent = `No se pudieron cargar los datos: ${e.name === "AbortError" ? "tiempo de espera agotado" : e.message}. Prueba con Actualizar u otra liga.`;
+    }
+  } finally {
+    if (my === reqId) { btn.disabled = false; btn.textContent = "Actualizar"; }
+  }
+  if (DATA && my === reqId) {
+    PREV = null;
+    if (!keepDate || !gameDates().includes($("#date").value)) $("#date").value = pickDefaultDate();
+    render();
+    loadPrev(my);
+  }
+}
+
+async function loadLeagues() {
+  const sel = $("#league");
+  const saved = LS.get("hockey-radar:league") || "serie_6_NHL";
+  try {
+    const r = await fetch("/api/hockey?part=leagues");
+    const data = await r.json();
+    if (data.leagues && data.leagues.length) {
+      sel.innerHTML = data.leagues.map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join("");
+    }
+  } catch {}
+  if (![...sel.options].some((o) => o.value === saved)) sel.insertAdjacentHTML("afterbegin", `<option value="${esc(saved)}">${esc(saved.replace(/^serie_\d+_/, "").replace(/_/g, " "))}</option>`);
+  sel.value = saved;
+  addCustomOption();
+}
+
+// Opción para cualquier liga de AnnaBet que no esté en el menú: se pega el enlace
+function addCustomOption() {
+  const sel = $("#league");
+  if (![...sel.options].some((o) => o.value === "__custom"))
+    sel.insertAdjacentHTML("beforeend", `<option value="__custom">➕ Otra liga (pegar enlace de AnnaBet)…</option>`);
+}
+let lastLeague = null;
+$("#league").addEventListener("focus", () => { lastLeague = $("#league").value; });
+$("#league").addEventListener("change", () => {
+  const sel = $("#league");
+  if (sel.value === "__custom") {
+    const url = prompt("Pega el enlace de la liga en AnnaBet (ej.: https://annabet.com/es/hockeystats/serie_6_NHL.html)") || "";
+    const m = /(serie_\d+_[A-Za-z0-9._()-]+?)\.html/.exec(url);
+    if (!m) { sel.value = lastLeague || sel.options[0].value; return; }
+    if (![...sel.options].some((o) => o.value === m[1]))
+      sel.insertAdjacentHTML("afterbegin", `<option value="${esc(m[1])}">${esc(m[1].replace(/^serie_\d+_/, "").replace(/_/g, " "))}</option>`);
+    sel.value = m[1];
+  }
+  LS.set("hockey-radar:league", sel.value); $("#q").value = ""; load(false);
+});
+$("#load").addEventListener("click", () => load(true));
+$("#date").addEventListener("change", () => DATA && render());
+$("#prev").addEventListener("click", () => shift(-1));
+$("#next").addEventListener("click", () => shift(1));
+$("#q").addEventListener("input", () => DATA && render());
+$("#hot").addEventListener("change", () => DATA && render());
+$("#date").value = isoOf(new Date());
+loadLeagues().then(() => load(false));
+</script>
+</body>
+</html>
