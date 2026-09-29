@@ -368,18 +368,79 @@ function parseGames(tables, knownKeys, nameOf) {
 }
 
 // ---------- ligas ----------
+// País de cada liga: 1) el título de país del menú de AnnaBet ("Germany", "Soccer England"),
+// 2) si no, el gentilicio del enlace ("serie_253_German_Regionalliga_West" → Alemania).
+const COUNTRY_ES = {
+  england: "Inglaterra", scotland: "Escocia", wales: "Gales", "northern ireland": "Irlanda del Norte", ireland: "Irlanda",
+  germany: "Alemania", spain: "España", italy: "Italia", france: "Francia", netherlands: "Países Bajos", holland: "Países Bajos",
+  belgium: "Bélgica", portugal: "Portugal", turkey: "Turquía", "türkiye": "Turquía", greece: "Grecia", russia: "Rusia",
+  ukraine: "Ucrania", poland: "Polonia", "czech republic": "Rep. Checa", czechia: "Rep. Checa", slovakia: "Eslovaquia",
+  austria: "Austria", switzerland: "Suiza", denmark: "Dinamarca", sweden: "Suecia", norway: "Noruega", finland: "Finlandia",
+  iceland: "Islandia", croatia: "Croacia", serbia: "Serbia", slovenia: "Eslovenia", bosnia: "Bosnia", "bosnia and herzegovina": "Bosnia",
+  romania: "Rumania", bulgaria: "Bulgaria", hungary: "Hungría", cyprus: "Chipre", israel: "Israel", latvia: "Letonia",
+  lithuania: "Lituania", estonia: "Estonia", belarus: "Bielorrusia", albania: "Albania", montenegro: "Montenegro",
+  "north macedonia": "Macedonia del Norte", macedonia: "Macedonia del Norte", georgia: "Georgia", armenia: "Armenia",
+  azerbaijan: "Azerbaiyán", kazakhstan: "Kazajistán", moldova: "Moldavia", malta: "Malta", luxembourg: "Luxemburgo",
+  "faroe islands": "Islas Feroe", andorra: "Andorra", "san marino": "San Marino", gibraltar: "Gibraltar",
+  brazil: "Brasil", argentina: "Argentina", chile: "Chile", colombia: "Colombia", mexico: "México", uruguay: "Uruguay",
+  paraguay: "Paraguay", peru: "Perú", ecuador: "Ecuador", bolivia: "Bolivia", venezuela: "Venezuela", usa: "EE.UU.",
+  "united states": "EE.UU.", canada: "Canadá", "costa rica": "Costa Rica", honduras: "Honduras", guatemala: "Guatemala",
+  "el salvador": "El Salvador", panama: "Panamá", nicaragua: "Nicaragua", jamaica: "Jamaica",
+  japan: "Japón", "south korea": "Corea del Sur", korea: "Corea del Sur", china: "China", australia: "Australia",
+  "saudi arabia": "Arabia Saudita", qatar: "Catar", "united arab emirates": "Emiratos Árabes", uae: "Emiratos Árabes",
+  iran: "Irán", india: "India", thailand: "Tailandia", vietnam: "Vietnam", indonesia: "Indonesia", malaysia: "Malasia",
+  singapore: "Singapur", egypt: "Egipto", morocco: "Marruecos", algeria: "Argelia", tunisia: "Túnez",
+  "south africa": "Sudáfrica", nigeria: "Nigeria", ghana: "Ghana", "new zealand": "Nueva Zelanda",
+  europe: "Europa", "north america": "Norteamérica", asia: "Asia", africa: "África", oceania: "Oceanía",
+  philippines: "Filipinas", taiwan: "Taiwán", lebanon: "Líbano", jordan: "Jordania", "puerto rico": "Puerto Rico",
+  "dominican republic": "Rep. Dominicana", cuba: "Cuba", international: "Internacional", world: "Mundial", "south america": "Sudamérica",
+};
+const DEMONYM_ES = {
+  english: "Inglaterra", scottish: "Escocia", welsh: "Gales", northern: "Irlanda del Norte", irish: "Irlanda",
+  german: "Alemania", spanish: "España", italian: "Italia", french: "Francia", dutch: "Países Bajos", belgian: "Bélgica",
+  portuguese: "Portugal", turkish: "Turquía", greek: "Grecia", russian: "Rusia", ukrainian: "Ucrania", polish: "Polonia",
+  czech: "Rep. Checa", slovak: "Eslovaquia", slovakian: "Eslovaquia", austrian: "Austria", swiss: "Suiza", danish: "Dinamarca",
+  swedish: "Suecia", norwegian: "Noruega", finnish: "Finlandia", icelandic: "Islandia", croatian: "Croacia", serbian: "Serbia",
+  slovenian: "Eslovenia", bosnian: "Bosnia", romanian: "Rumania", bulgarian: "Bulgaria", hungarian: "Hungría",
+  cypriot: "Chipre", cyprus: "Chipre", israeli: "Israel", latvian: "Letonia", lithuanian: "Lituania", estonian: "Estonia",
+  belarusian: "Bielorrusia", albanian: "Albania", montenegrin: "Montenegro", macedonian: "Macedonia del Norte",
+  georgian: "Georgia", armenian: "Armenia", azerbaijani: "Azerbaiyán", kazakh: "Kazajistán", moldovan: "Moldavia",
+  maltese: "Malta", luxembourg: "Luxemburgo", faroese: "Islas Feroe", brazilian: "Brasil", argentinian: "Argentina",
+  argentine: "Argentina", argentina: "Argentina", chilean: "Chile", colombian: "Colombia", mexican: "México",
+  uruguayan: "Uruguay", paraguayan: "Paraguay", peruvian: "Perú", ecuadorian: "Ecuador", bolivian: "Bolivia",
+  venezuelan: "Venezuela", american: "EE.UU.", us: "EE.UU.", usa: "EE.UU.", canadian: "Canadá", japanese: "Japón",
+  korean: "Corea del Sur", chinese: "China", australian: "Australia", saudi: "Arabia Saudita", qatari: "Catar",
+  egyptian: "Egipto", moroccan: "Marruecos", algerian: "Argelia", tunisian: "Túnez", "south": null,
+};
+function countryOfHeading(t) {
+  const k = String(t || "").replace(/^(soccer|football|basketball|ice hockey|hockey)\s+/i, "").trim().toLowerCase();
+  return COUNTRY_ES[k] || null;
+}
+function countryOfSlug(slug) {
+  const w = String(slug || "").split("_");
+  return DEMONYM_ES[(w[0] || "").toLowerCase()] || null;
+}
 function parseLeagues(html) {
   const re = /href="[^"]*?(serie_(\d+)_([^"\/]+?))\.html"[^>]*>([\s\S]*?)<\/a>/gi;
   const out = new Map();
-  let m;
+  let m, last = 0, heading = null;
   while ((m = re.exec(html))) {
-    if (/,/.test(m[1])) continue; // enlaces de temporadas anteriores (serie_6_NHL,175,season_2024-2025)
+    // texto entre el enlace anterior y este = posible título de país del menú
+    const aStart = Math.max(last, html.lastIndexOf("<a", m.index));
+    const between = decode(html.slice(last, aStart).replace(/<a\b[\s\S]*?<\/a>/gi, " "));
+    last = m.index + m[0].length;
+    if (between) heading = between.length <= 40 && !/\d/.test(between) ? between : null;
+    if (/,/.test(m[1])) continue; // enlaces de temporadas anteriores
     let id = decode(m[1]);
     try { id = decodeURIComponent(id); } catch {}
     const txt = decode(m[4]) || m[3].replace(/_/g, " ");
-    if (!out.has(id)) out.set(id, txt);
+    const country = countryOfHeading(heading) || countryOfSlug(m[3]);
+    // "Alemania: Regionalliga West" (sin repetir el país si el nombre ya lo trae)
+    const label = country && !tkey(txt).includes(tkey(country)) ? `${country}: ${txt.replace(/^(English|German|Spanish|Italian|French|Finnish|Swedish|Norwegian|Danish|Dutch|Belgian|Portuguese|Turkish|Greek|Russian|Polish|Czech|Swiss|Austrian|Scottish|Irish|Brazilian|Argentinian|Mexican|American|Japanese|Korean|Chinese|Australian)\s+/i, "")}` : txt;
+    if (!out.has(id)) out.set(id, label);
   }
-  return [...out.entries()];
+  // Orden alfabético por país: en la lista se escribe "Ale…" y salta a Alemania
+  return [...out.entries()].sort((x, y) => x[1].localeCompare(y[1], "es"));
 }
 
 // Temporadas anteriores de la misma liga: "serie_6_NHL,175,season_2024-2025" (más reciente primero)
