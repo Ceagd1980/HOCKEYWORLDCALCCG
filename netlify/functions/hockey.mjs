@@ -44,14 +44,19 @@ function num(v) {
 // Lee la página por partes y se detiene al llegar al tiempo límite: si AnnaBet es lento,
 // se trabaja con lo que alcanzó a llegar (las tablas de posiciones y partidos están arriba)
 // en lugar de fallar todo. Netlify corta las funciones a los 10 s.
-async function getHtmlPartial(url, maxMs = 8000) {
+async function getHtmlPartial(url, maxMs = 8000, extraHeaders = {}) {
   const ctrl = new AbortController();
   const deadline = Date.now() + maxMs;
   const timer = setTimeout(() => ctrl.abort(), maxMs + 500);
   try {
-    const r = await fetch(url, { headers: HEADERS, signal: ctrl.signal, redirect: "follow" });
+    // si AnnaBet corta la conexión ("fetch failed") se reintenta mientras quede tiempo
+    let r;
+    for (let k = 0; ; k++) {
+      try { r = await fetch(url, { headers: { ...HEADERS, ...extraHeaders }, signal: ctrl.signal, redirect: "follow" }); break; }
+      catch (e) { if (e.name === "AbortError" || k >= 2 || deadline - Date.now() < 2500) throw e; await sleep(400); }
+    }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    if (!r.body || !r.body.getReader) return { html: await r.text(), partial: false };
+    if (!r.body || !r.body.getReader) return { html: await r.text(), partial: false, finalUrl: r.url, redirected: r.redirected };
     const reader = r.body.getReader();
     const dec = new TextDecoder();
     let html = "", partial = false;
@@ -65,7 +70,7 @@ async function getHtmlPartial(url, maxMs = 8000) {
     }
     if (partial) { try { reader.cancel(); } catch {} }
     if (!/<table/i.test(html)) throw new Error(partial ? "AnnaBet tardó demasiado en responder" : "la página no trae tablas (posible bloqueo o liga sin datos)");
-    return { html, partial };
+    return { html, partial, finalUrl: r.url, redirected: r.redirected };
   } catch (e) {
     throw e.name === "AbortError" ? new Error("AnnaBet tardó demasiado en responder") : e;
   } finally {
@@ -241,7 +246,10 @@ function parseStandings(html, tables) {
   };
   const size = (m) => (m ? Object.keys(m).length : 0);
   // Caso: solo se leyeron casa y fuera (la general falló) → las 2 tablas son casa/fuera
-  if (maps.length === 2) { out.home = maps[0]; out.away = maps[1]; out.all = derive(out.home, out.away); out.derived = true; }
+  // Dos tablas: solo son casa/fuera si tienen más o menos los mismos partidos (si no: general + forma)
+  const medGp2 = (m) => { const a = Object.values(m).map((x) => x.gp).sort((x, y) => x - y); return a.length ? a[Math.floor(a.length / 2)] : 0; };
+  if (maps.length === 2 && Math.abs(medGp2(maps[0]) - medGp2(maps[1])) > 1) { out.all = medGp2(maps[0]) >= medGp2(maps[1]) ? maps[0] : maps[1]; out.home = null; out.away = null; }
+  else if (maps.length === 2) { out.home = maps[0]; out.away = maps[1]; out.all = derive(out.home, out.away); out.derived = true; }
   else if (out.home && out.away && size(out.all) < size(out.home)) { out.all = derive(out.home, out.away); out.derived = true; }
   // Coherencia: en casa + fuera no puede tener más partidos que la general; si pasa, se descartan
   if (out.all && out.home && out.away) {
@@ -261,7 +269,7 @@ const iso = (y, m, d) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStar
 // Reconoce "Thursday 24. September 2026", "24. September 2026", "24.9.2026", "24.09.26", "24.9."
 // Fecha de hoy/mañana/ayer según la hora de Europa central (AnnaBet es un sitio europeo)
 function relDay(offset) {
-  const now = new Date(Date.now() + 2 * 3600 * 1000 + offset * 86400000); // ≈ hora de Europa (CEST)
+  const now = new Date(Date.now() + offset * 86400000); // AnnaBet escribe las fechas en hora UTC
   return iso(now.getUTCFullYear(), now.getUTCMonth() + 1, now.getUTCDate());
 }
 
@@ -343,7 +351,7 @@ function parseGames(tables, knownKeys, nameOf) {
       // prórroga en una celda aparte ("ot" / "so")
       if (score && !extra) { const oc = r.find((c) => /^\s*(ot|so|pen|ap)\.?\s*$/i.test(c)); if (oc) extra = oc.trim().toLowerCase().replace(".", ""); }
       const time = /\b([01]?\d|2[0-3]):([0-5]\d)\b/.exec(rowText);
-      let odds = r.map((c) => c.trim()).filter((c) => /^\d{1,2}\.\d{2}$/.test(c)).map(Number);
+      let odds = r.map((c) => c.trim()).filter((c) => /^\d{1,3}\.\d{2}$/.test(c)).map(Number);
       if (odds.length < 2) { // cuotas en una sola celda "2.56 / 4.10 / 2.37"
         const oc = r.find((c) => /^\s*\d{1,2}\.\d{2}(\s*[\/|]\s*\d{1,2}\.\d{2}){1,2}\s*$/.test(c));
         if (oc) odds = oc.split(/[\/|]/).map((x) => Number(x.trim()));
@@ -421,7 +429,8 @@ function countryOfSlug(slug) {
   return DEMONYM_ES[(w[0] || "").toLowerCase()] || null;
 }
 function parseLeagues(html) {
-  const re = /href="[^"]*?(serie_(\d+)_([^"\/]+?))\.html"[^>]*>([\s\S]*?)<\/a>/gi;
+  // Solo enlaces <a> reales (no <link hreflang> de la cabecera), con texto corto
+  const re = /<a\b[^>]*?href="([^"]*?)(serie_(\d+)_([^"\/]+?))\.html"[^>]*>((?:(?!<\/a>)[\s\S]){0,300}?)<\/a>/gi;
   const out = new Map();
   let m, last = 0, heading = null;
   while ((m = re.exec(html))) {
@@ -430,13 +439,18 @@ function parseLeagues(html) {
     const between = decode(html.slice(last, aStart).replace(/<a\b[\s\S]*?<\/a>/gi, " "));
     last = m.index + m[0].length;
     if (between) heading = between.length <= 40 && !/\d/.test(between) ? between : null;
-    if (/,/.test(m[1])) continue; // enlaces de temporadas anteriores
-    let id = decode(m[1]);
+    if (/,/.test(m[2])) continue;
+    // selector de idioma: el mismo enlace en /es/, /fi/, /de/... → se ignora (solo /en/ o /us/)
+    const lang = (/\/([a-z]{2})\/[a-z]+stats\//i.exec(m[1]) || [])[1];
+    if (lang && !/^(en|us)$/i.test(lang)) continue; // enlaces de temporadas anteriores
+    let id = decode(m[2]);
     try { id = decodeURIComponent(id); } catch {}
-    const txt = decode(m[4]) || m[3].replace(/_/g, " ");
-    const country = countryOfHeading(heading) || countryOfSlug(m[3]);
+    let txt = decode(m[5]);
+    if (!txt || txt.length > 60 || /[#{};"<>]|^languages?\b|^(english|español|suomi|svenska|deutsch|français|italiano)$/i.test(txt)) txt = m[4].replace(/_/g, " ");
+    // país: título del menú → gentilicio del enlace → gentilicio o país al inicio del nombre ("Brazilian Serie B")
+    const country = countryOfHeading(heading) || countryOfSlug(m[4]) || countryOfSlug(txt.replace(/\s+/g, "_")) || countryOfHeading(txt.split(/\s+/)[0]);
     // "Alemania: Regionalliga West" (sin repetir el país si el nombre ya lo trae)
-    const label = country && !tkey(txt).includes(tkey(country)) ? `${country}: ${txt.replace(/^(English|German|Spanish|Italian|French|Finnish|Swedish|Norwegian|Danish|Dutch|Belgian|Portuguese|Turkish|Greek|Russian|Polish|Czech|Swiss|Austrian|Scottish|Irish|Brazilian|Argentinian|Mexican|American|Japanese|Korean|Chinese|Australian)\s+/i, "")}` : txt;
+    const label = country && !tkey(txt).includes(tkey(country)) ? `${country}: ${txt.replace(/^(English|German|Spanish|Italian|French|Finnish|Swedish|Norwegian|Danish|Dutch|Belgian|Portuguese|Turkish|Greek|Russian|Polish|Czech|Swiss|Austrian|Scottish|Irish|Brazilian|Argentinian|Mexican|American|Japanese|Korean|Chinese|Australian|Colombian|Chilean|Peruvian|Ecuadorian|Uruguayan|Paraguayan|Bolivian|Venezuelan|Ukrainian|Romanian|Bulgarian|Hungarian|Croatian|Serbian|Slovenian|Slovak|Israeli|Cypriot|Icelandic|Welsh|Argentine|Belarusian|Latvian|Lithuanian|Estonian|Egyptian|Moroccan|Saudi|Canadian)\s+/i, "")}` : txt;
     if (!out.has(id)) out.set(id, label);
   }
   // Orden alfabético por país: en la lista se escribe "Ale…" y salta a Alemania
@@ -471,7 +485,8 @@ const cleanLeague = (s) => (s && /^serie_\d+_[^\/?#\s"<>]+$/.test(s) ? s : null)
 
 async function leaguesResponse() {
   try {
-    const html = await getHtml(`${SITE}${MENU_PAGE}.html`);
+    // el menú está al principio de la página: se lee por partes, hasta 8 s, con reintentos
+    const { html } = await getHtmlPartial(`${SITE}${MENU_PAGE}.html`, 8000);
     const list = parseLeagues(html);
     if (list.length < 5) throw new Error("menú de ligas no encontrado");
     return json({ ok: true, leagues: list, source: "annabet" }, 200, {
@@ -501,12 +516,17 @@ async function debugUpcoming() {
 async function debugResponse(league) {
   const u = `${SITE}${encodeURI(league)}.html`;
   try {
-    const r = await fetch(u, { headers: HEADERS });
-    const html = await r.text();
+    // hasta 3 intentos: AnnaBet a veces corta la conexión ("fetch failed")
+    let r, html, lastErr;
+    for (let k = 0; k < 3 && !html; k++) {
+      try { r = await fetch(u, { headers: HEADERS }); html = await r.text(); }
+      catch (e) { lastErr = e; await sleep(700); }
+    }
+    if (!html) throw lastErr || new Error("sin respuesta");
     const tables = parseTables(html);
     return json({
       url: u, status: r.status, bytes: html.length, tablas: tables.length,
-      muestra: tables.slice(0, 12).map((t, i) => ({
+      muestra: tables.slice(0, 30).map((t, i) => ({
         n: i, filas: t.rows.length,
         antes: decode(html.slice(Math.max(0, t.index - 300), t.index)).slice(-120),
         primeras: t.rows.slice(0, 4),
@@ -522,16 +542,135 @@ async function debugResponse(league) {
             sinFecha: g.filter((x) => !x.date).slice(0, 8).map((x) => x.raw) };
         } catch (e) { return { error: e.message }; }
       })(),
-      portadaProximos: await debugUpcoming(),
+      pestanaProximos: probeUpcoming(html),
+      candidatosProximos: upcomingCandidates(html, league),
     }, 200, { "Cache-Control": "no-store" });
   } catch (e) {
     return json({ url: u, error: e.message }, 200, { "Cache-Control": "no-store" });
   }
 }
 
+
+// ---------- partidos próximos ----------
+// La página de la liga de AnnaBet trae resultados, pero la pestaña "Upcoming Games" se carga aparte.
+// 1) Se buscan en el HTML de la liga los enlaces/direcciones que parezcan de próximos partidos.
+// 2) Además se usa la página del día de AnnaBet (results_0 = hoy, results_1 = mañana si existe).
+// La página pide cada fuente con ?part=rows&path=... y une los partidos de sus equipos.
+const ORIGIN = "https://annabet.com";
+function upcomingCandidates(html, league) {
+  const sid = (/^serie_(\d+)_/.exec(league) || [])[1] || "";
+  const found = new Set();
+  const re = /["'(=\s]((?:https?:\/\/(?:www\.)?annabet\.com)?\/?[\w\/.\-]*?(?:upcoming|coming|next_?games?|fixtures?|schedule|program)[\w\/.\-]*(?:\.php|\.html|\/)?(?:\?[\w=&%.,\-]*)?)["')\s]/gi;
+  let m;
+  while ((m = re.exec(html))) {
+    let u = m[1].replace(/&amp;/g, "&").replace(/^https?:\/\/(?:www\.)?annabet\.com/i, "");
+    if (u.length < 6 || /\.(js|css|png|jpg|gif|svg)(\?|$)/i.test(u)) continue;
+    if (!/\.(php|html?)\b|\?/i.test(u)) continue; // solo páginas reales (no nombres de pestañas)
+    if (!u.startsWith("/")) u = new URL(u, SITE).pathname + (u.includes("?") ? u.slice(u.indexOf("?")) : "");
+    // de otra liga: "serie=12" no es la liga 1 (también "serie=i%3A1%3B" = i:1;)
+    const dec = decodeURIComponent(u);
+    if (sid && /serie=|serie_|id=/.test(dec) && !new RegExp(`(serie[=_](?:i:)?|id=)${sid}(\\D|$)`).test(dec)) continue;
+    found.add(u);
+  }
+  const base = new URL(SITE).pathname; // "/en/soccerstats/"
+  // La pestaña de AnnaBet (ajax_upcoming) es la fuente buena. La página del día (results_0) trae TODAS las
+  // ligas y podría mezclar copas o equipos femeninos/filiales: solo se usa si no hay pestaña.
+  const list = [...found].slice(0, 3);
+  return list.length ? list : [`${base}results_0.html`];
+}
+const cleanPath = (p) => (p && /^\/[\w\/.,?=&%\-]+$/.test(p) && !p.includes("..") ? p : null);
+
+// Filas genéricas de partido: dos equipos (texto) + hora o marcador
+function genericRows(html, dayOffset) {
+  const rows = [];
+  const tables = parseTables(html);
+  const baseDate = dayOffset != null ? relDay(dayOffset) : null;
+  for (const t of tables) {
+    let curDate = null, league = "";
+    for (const r of t.rows) {
+      const rowText = r.join(" | ");
+      if (/odds:|cuotas:|season|relegation|promotion|average|total|%/i.test(rowText) && !/\b\d{1,2}:\d{2}\b/.test(rowText)) continue;
+      const d = findDate(rowText);
+      const time = r.map((c) => /(?:^|\D)(([01]?\d|2[0-3]):[0-5]\d)(?!\d)/.exec(c)).find(Boolean);
+      // "04.10. 13:30" / "Sat 04.10 13:30" (día.mes junto a la hora)
+      let dm = null;
+      for (const c of r) { const x = /(\d{1,2})\.(\d{1,2})\.?\s+\d{1,2}:\d{2}/.exec(c); if (x) { dm = nearest(+x[1], +x[2]); break; } }
+      let score = null, ot = "";
+      for (const c of r) {
+        const sm = /^\s*(\d{1,3})\s*[-–]\s*(\d{1,3})\s*(ot|so|pen|ps|ap|et|aet)?\.?\s*(?:\(.*\))?\s*$/i.exec(c);
+        if (sm) { score = [+sm[1], +sm[2]]; ot = (sm[3] || "").toLowerCase(); break; }
+      }
+      const texts = r.map((c) => c.trim()).filter((c) => c.length >= 2 && c.length <= 45 && /[A-Za-zÀ-ÿ]{2}/.test(c) &&
+        !findDate(c) && !/\d{1,2}:\d{2}/.test(c) && !/^(ot|so|pen|ap|et|aet|ft|fin|final|live|postp\.?|canc\.?|\d+\.\s*|mon|tue|wed|thu|fri|sat|sun|today|tomorrow)$/i.test(c));
+      let a = null, b = null;
+      if (texts.length >= 2) { [a, b] = texts; }
+      else if (texts.length === 1 && /\s[-–]\s/.test(texts[0])) { const p = texts[0].split(/\s[-–]\s/); if (p.length === 2) { a = p[0].trim(); b = p[1].trim(); } }
+      if (!a || !b) {
+        if (d) curDate = d;
+        else if (texts.length === 1 && !time && !score) league = texts[0];
+        continue;
+      }
+      let odds = r.map((c) => c.trim()).filter((c) => /^\d{1,3}\.\d{2}$/.test(c)).map(Number);
+      if (odds.length < 2) {
+        const oc = r.find((c) => /^\s*\d{1,2}\.\d{2}(\s*[\/|]\s*\d{1,2}\.\d{2}){1,2}\s*$/.test(c));
+        odds = oc ? oc.split(/[\/|]/).map((x) => Number(x.trim())) : [];
+      }
+      if (!time && !score && odds.length < 2) continue;
+      rows.push({
+        date: dm || d || curDate || baseDate, time: time ? time[1] : "", a, b, score,
+        ...(ot ? { ot: /so|pen|ps/.test(ot) ? "SO" : "OT" } : {}),
+        odds: odds.length >= 2 ? odds.slice(0, 3) : null, league,
+      });
+    }
+  }
+  return rows;
+}
+
+async function rowsResponse(path) {
+  const p = cleanPath(path);
+  if (!p) return json({ ok: false, error: "ruta no válida" }, 400, { "Cache-Control": "no-store" });
+  const off = /results_(-?\d+)\.html/.exec(p);
+  try {
+    // las direcciones ajax_ de AnnaBet se piden como lo hace su página (jQuery .load)
+    const ajax = /ajax_/i.test(p) ? { "X-Requested-With": "XMLHttpRequest", Referer: SITE, Accept: "text/html, */*; q=0.01" } : {};
+    // igual que la página de AnnaBet: dirección + "&" + número al azar (evita respuestas viejas)
+    const r = await getHtmlPartial(ORIGIN + p + (/ajax_/i.test(p) ? `&${Math.random()}` : ""), 8500, ajax);
+    // si AnnaBet nos manda a otra página (portada, aviso de límite), esas filas no son de la liga
+    const fin = r.finalUrl ? new URL(r.finalUrl).pathname : "";
+    if (r.redirected && fin && !p.startsWith(fin))
+      return json({ ok: false, path: p, error: `AnnaBet redirigió a ${fin} (posible límite de visitas, reintenta en unos minutos)`, rows: [] }, 200, { "Cache-Control": "no-store" });
+    const rows = genericRows(r.html, off ? +off[1] : null);
+    // sin filas reconocidas: se devuelve una muestra de cómo viene la página para corregir el lector
+    const sample = rows.length ? undefined : parseTables(r.html).filter((t) => t.rows.length > 1).slice(0, 2)
+      .map((t) => t.rows.slice(0, 5).map((x) => x.join(" | ").slice(0, 160)));
+    return json({ ok: true, path: p, rows, partial: r.partial, bytes: r.html.length, sample }, 200, { "Cache-Control": "no-store" });
+  } catch (e) {
+    return json({ ok: false, path: p, error: e.message, rows: [] }, 200, { "Cache-Control": "no-store" });
+  }
+}
+
+// Diagnóstico de la pestaña "Upcoming Games": scripts y textos que la cargan
+function probeUpcoming(html) {
+  const out = { scripts: [], snippets: [], ids: [] };
+  for (const m of html.matchAll(/<script[^>]*\bsrc="([^"]+)"/gi)) out.scripts.push(m[1]);
+  const au = html.indexOf("ajax_upcoming");
+  if (au >= 0) out.ajax = html.slice(au, au + 500).replace(/\s+/g, " ");
+  for (const m of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
+    const s = m[1];
+    for (const k of s.matchAll(/(upcoming|ajax|\.php|load\(|fetch\(|XMLHttp|\$\.get|\$\.post|getJSON)/gi)) {
+      out.snippets.push(s.slice(Math.max(0, k.index - 150), k.index + 200).replace(/\s+/g, " "));
+      if (out.snippets.length >= 12) break;
+    }
+    if (out.snippets.length >= 12) break;
+  }
+  for (const m of html.matchAll(/<[^>]+(?:upcoming|coming|next)[^>]*>/gi)) { out.ids.push(m[0].slice(0, 250)); if (out.ids.length >= 12) break; }
+  return out;
+}
+
 export default async (req) => {
   const T0 = Date.now();
   const url = new URL(req.url);
+  if (url.searchParams.get("part") === "rows") return rowsResponse(url.searchParams.get("path"));
   const part = url.searchParams.get("part");
   if (part === "leagues") return leaguesResponse();
   const askedLeague = url.searchParams.get("league");
@@ -556,7 +695,8 @@ export default async (req) => {
     standings = parseStandings(html, tables);
   } catch (e) {
     // Temporada recién empezada sin tabla todavía: se usa la tabla de la temporada anterior
-    const prevS = part === "standings" ? null : parseSeasons(html, league)[0];
+    const nowY = new Date(), startNow = nowY.getUTCMonth() >= 6 ? nowY.getUTCFullYear() : nowY.getUTCFullYear() - 1;
+    const prevS = part === "standings" ? null : parseSeasons(html, league).find((x) => x.start < startNow);
     const left = 9300 - (Date.now() - T0);
     if (prevS && left > 1500) {
       try {
@@ -598,13 +738,18 @@ export default async (req) => {
   const early = !standingsFromPrev && (!gps.length || median(gps) < MIN_GP);
   if (standingsFromPrev) warnings.push(`AnnaBet aún no trae la tabla de esta temporada: todos los cálculos usan la temporada ${standingsFromPrev}.`);
   const seasons = parseSeasons(html, league);
-  const curStart = +((/(\d{4})\s*[-\/]\s*\d{2,4}/.exec(title) || [])[1] || 0);
-  const prev = seasons.find((s) => !curStart || s.start < curStart) || null;
+  // Año de inicio de la temporada actual: del título ("NHL 2025-2026") o, si no lo trae ("German DEL"),
+  // por la fecha: de julio a diciembre empieza este año, de enero a junio empezó el año pasado.
+  const now = new Date();
+  const curStart = +((/(\d{4})\s*[-\/]\s*\d{2,4}/.exec(title) || [])[1] || 0) ||
+    (now.getUTCMonth() >= 6 ? now.getUTCFullYear() : now.getUTCFullYear() - 1);
+  const prev = seasons.find((s) => s.start < curStart) || null;
   if (early && prev) warnings.push(`Inicio de temporada: los equipos con menos de ${MIN_GP} partidos se calculan con la temporada ${prev.label}.`);
   else if (early) warnings.push(`Inicio de temporada: pocos partidos jugados y no se encontró la temporada anterior; los cálculos son poco fiables.`);
 
   return json(
     { ok: true, league, title, updated: new Date().toISOString(), standings, games, warnings, minGp: MIN_GP,
+      upcomingUrls: upcomingCandidates(html, league), upcomingProbe: probeUpcoming(html),
       prevSeason: prev ? { id: prev.id, label: prev.label } : null, early },
     200,
     cacheHdr
