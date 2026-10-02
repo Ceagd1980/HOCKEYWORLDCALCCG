@@ -113,6 +113,7 @@ select{font:600 15px "Barlow Semi Condensed";background:var(--panel);color:var(-
 .box .mini td{font-size:13px}
 .box .rc{font-size:11.5px;white-space:nowrap;letter-spacing:-.2px}
 .box{min-width:0}
+.night{color:#9fb6ff}
 </style>
 </head>
 <body>
@@ -120,13 +121,14 @@ select{font:600 15px "Barlow Semi Condensed";background:var(--panel);color:var(-
   <h1>Radar Hockey · NHL<small>NHL y ligas del mundo (AnnaBet): 1X2 en 60 min, ganador con prórroga, PPG, goles totales y hándicap</small></h1>
   <div class="controls">
     <label for="league" class="sr">Liga</label>
-    <select id="league"><option value="serie_6_NHL">NHL</option></select>
+    <select id="league" autocomplete="off"><option value="serie_6_NHL">NHL</option></select>
     <label for="q" class="sr">Buscar equipo</label>
     <input type="search" id="q" placeholder="Buscar equipo" autocomplete="off">
     <label class="chk" title="Muestra solo los partidos donde el favorito tiene más de 55% de probabilidad de ganar (incluye prórroga), ordenados de mayor a menor confianza"><input type="checkbox" id="hot"> 🔥 +55%</label>
+    <label class="chk" title="AnnaBet pone las fechas en hora UTC (5 horas más que Ecuador): los partidos desde las 7 p. m. de Ecuador salen con la fecha del día siguiente. Marca esta casilla para ver también esos partidos en el día elegido."><input type="checkbox" id="night"> 🌙 + noche</label>
     <button id="prev" class="nav" type="button" aria-label="Fecha anterior con partidos">◀</button>
     <label for="date" class="sr">Fecha</label>
-    <input type="date" id="date">
+    <input type="date" id="date" autocomplete="off">
     <button id="next" class="nav" type="button" aria-label="Fecha siguiente con partidos">▶</button>
     <button id="load">Actualizar</button>
   </div>
@@ -325,6 +327,8 @@ function pickDefaultDate() {
   const ds = gameDates(), today = isoOf(new Date());
   if (!ds.length) return today;
   if (ds.includes(today)) return today;
+  // 🌙: si AnnaBet pone partidos mañana (UTC), pueden ser esta noche: se abre hoy
+  if ($("#night").checked) { const t = new Date(); const tm = isoOf(new Date(t.getFullYear(), t.getMonth(), t.getDate() + 1)); if (ds.includes(tm)) return today; }
   return ds.find((d) => d > today) || ds[ds.length - 1];
 }
 function shift(dir) {
@@ -338,7 +342,10 @@ function render() {
   const el = $("#games"), st = $("#status");
   const day = $("#date").value;
   const q = ($("#q").value || "").trim().toLowerCase();
-  const all = (DATA.games || []).filter((g) => g.date === day);
+  // 🌙: también los partidos que AnnaBet pone al día siguiente (pueden ser esta noche en Ecuador)
+  const nextDay = (() => { const [y, m, d] = day.split("-").map(Number); return isoOf(new Date(y, m - 1, d + 1)); })();
+  const withNight = $("#night").checked;
+  const all = (DATA.games || []).filter((g) => g.date === day || (withNight && g.date === nextDay && !g.score));
   const onlyHot = $("#hot").checked;
   for (const g of all) { g._tb = tablesFor(g); g._conf = confidence(...g._tb.t); }
   // Los de mayor confianza primero
@@ -349,7 +356,8 @@ function render() {
   if (!all.length) {
     const next = ds.find((d) => d > day), prev = [...ds].reverse().find((d) => d < day);
     el.innerHTML = `<div class="empty">No hay partidos de ${esc(DATA.title)} el ${dayTitle(day)}.` +
-      (next ? ` Próxima fecha con partidos: <b>${dayTitle(next)}</b> (usa ▶).` : prev ? ` Última fecha con partidos: <b>${dayTitle(prev)}</b> (usa ◀).` : " AnnaBet no muestra partidos para esta liga ahora.") + `</div>`;
+      (next ? ` Próxima fecha con partidos: <b>${dayTitle(next)}</b> (usa ▶).` : prev ? ` Última fecha con partidos: <b>${dayTitle(prev)}</b> (usa ◀).` : " AnnaBet no muestra partidos para esta liga ahora.") +
+      (!(DATA.games || []).some((g) => !g.score) ? `<br><br><b>AnnaBet todavía no publicó próximos partidos de esta liga</b> (su pestaña "Próximos partidos" está vacía). Cuando los publique, aparecerán aquí solos.` : "") + `</div>`;
   } else if (!list.length) {
     el.innerHTML = onlyHot
       ? `<div class="empty">Ningún partido de este día tiene un favorito con más de 55%. Desmarca 🔥 +55% para ver todos.</div>`
@@ -365,7 +373,8 @@ function render() {
       const flame = c ? `<span class="flame${hot ? " hot" : ""}" title="Confianza: probabilidad del favorito de ganar (con prórroga), promedio General y LL/VV">🔥 ${c.side} ${(c.p * 100).toFixed(0)}%</span>` : "";
       const prevNote = g._tb.prev ? `<div class="meta prevnote">📅 Inicio de temporada: calculado con la temporada ${esc(PREV.label)}</div>` : "";
       return `<article class="game${hot ? " hot" : ""}">
-        <div class="meta"><span>${esc(g.time || "Hora por confirmar")} ${fin}</span>${flame}</div>
+        <div class="meta"><span>${esc(g.time || (g.score ? "" : "Sin hora (AnnaBet solo da la fecha)"))} ${fin}</span>${flame}</div>
+        ${g.date !== day ? `<div class="meta night">🌙 AnnaBet lo pone el ${dayTitle(g.date)} (hora UTC): si es de noche, en Ecuador se juega el ${dayTitle(day)}</div>` : ""}
         ${odds ? `<div class="meta">${odds}</div>` : ""}
         ${prevNote}
         <div class="teams">${teamRow(g.home, "home", Lg)}${teamRow(g.away, "away", Vg)}</div>
@@ -419,10 +428,90 @@ async function loadPrev(my) {
   render();
 }
 
+const LSKEY = "hockey-radar:league";
+const API = "/api/hockey";
+// ---------- partidos próximos (pestaña "Upcoming Games" y página del día de AnnaBet) ----------
+let AUTO_DATE = true;
+let NIGHT_SET = false;
+// Ligas de América: la casilla 🌙 se marca sola (salvo que la hayas cambiado tú)
+const AMERICAS = /brazil|brasil|colombia|argentin|mexic|major league soccer|\bmls\b|\busl\b|chile|peru|ecuador|urugua|paragua|bolivia|venezuel|canad|costa rica|hondur|guatemal|salvador|panam|nicaragu|jamaica|liga mx|libertadores|sudamericana|concacaf|\bnhl\b|\bahl\b|echl|\bohl\b|\bwhl\b|pwhl|qmjhl|\busa\b/i;
+function autoNight() {
+  const saved = LS.get("hockey-radar:night");
+  if (saved != null) { $("#night").checked = saved === "1" && AMERICAS.test(`${DATA?.title} ${DATA?.league}`); return; }
+  $("#night").checked = AMERICAS.test(`${DATA?.title} ${DATA?.league}`);
+} // la fecha se elige sola hasta que el usuario la cambie
+const tkc = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+function teamIndex() {
+  const S = DATA.standings || {}, names = {};
+  for (const m of [S.all, S.home, S.away]) for (const [k, v] of Object.entries(m || {})) names[k] ||= v.team;
+  const keys = Object.keys(names);
+  const keyOf = (name, exactOnly) => {
+    const k = tkc(name);
+    if (!k) return null;
+    if (names[k]) return k;
+    if (exactOnly) return null;
+    if (k.length < 5) return null;
+    const hits = keys.filter((x) => x.length >= 5 && (x.includes(k) || k.includes(x)));
+    if (hits.length !== 1) return null;
+    // "Oberhausen W", "Dortmund U19", "Bonner SC II" son otros equipos (femenino, juvenil, filial)
+    const extra = (k.length > hits[0].length ? k.replace(hits[0], "") : hits[0].replace(k, ""));
+    if (/^(w|women|femenino|ii|iii|b|u\d{2}|res|reserves|youth)$/.test(extra)) return null;
+    return hits[0];
+  };
+  return { keyOf, nameOf: (k) => names[k] };
+}
+async function loadUpcoming(my) {
+  const urls = DATA?.upcomingUrls || [];
+  if (!urls.length) return;
+  const res = await Promise.allSettled(urls.map((p) =>
+    fetch(`${API}?part=rows&path=${encodeURIComponent(p)}`).then((r) => r.json())));
+  if (my !== reqId || !DATA) return;
+  const { keyOf, nameOf } = teamIndex();
+  const idx = new Map(DATA.games.map((g) => [`${g.date}|${g.homeKey}|${g.awayKey}`, g]));
+  let added = 0, read = 0;
+  const shiftDay = (d, n) => { const [y, m, dd] = d.split("-").map(Number); return isoOf(new Date(y, m - 1, dd + n)); };
+  for (const r of res) {
+    if (r.status !== "fulfilled" || !r.value || !r.value.ok) continue;
+    read++;
+    // la página del día trae todas las ligas: ahí solo nombres exactos (sin parecidos)
+    const strict = /results_/.test(r.value.path || "");
+    for (const row of r.value.rows || []) {
+      const hk = keyOf(row.a, strict), ak = keyOf(row.b, strict);
+      if (!hk || !ak || hk === ak || !row.date) continue;
+      const id = `${row.date}|${hk}|${ak}`;
+      // el mismo partido puede venir con un día de diferencia (hora UTC): se une, no se duplica
+      const g = idx.get(id) || idx.get(`${shiftDay(row.date, -1)}|${hk}|${ak}`) || idx.get(`${shiftDay(row.date, 1)}|${hk}|${ak}`);
+      if (g) {
+        if (!g.score && row.score) { g.score = row.score; if (row.ot) g.ot = row.ot; }
+        g.time ||= row.time; g.odds ||= row.odds;
+        continue;
+      }
+      const ng = { date: row.date, time: row.time || "", home: nameOf(hk), away: nameOf(ak), homeKey: hk, awayKey: ak,
+        score: row.score || null, odds: row.odds || null, hc: null, ...(row.ot ? { ot: row.ot } : {}) };
+      DATA.games.push(ng); idx.set(id, ng); added++;
+    }
+  }
+  const today = isoOf(new Date());
+  const future = DATA.games.some((g) => g.date >= today && !g.score);
+  if (!future) {
+    const pr = DATA.upcomingProbe || {};
+    const info = res.map((r, i) => `${urls[i].replace(/^.*\//, "")}: ${r.status === "fulfilled" && r.value ? (r.value.ok ? (r.value.rows || []).length + " filas" : "error " + (r.value.error || "")) : "sin respuesta"}`).join(" · ");
+    const hints = [pr.ajax ? String(pr.ajax).slice(0, 500) : null, ...(pr.ajax ? [] : [...(pr.ids || []).slice(0, 3), ...(pr.snippets || []).slice(0, 3)].map((x) => String(x).slice(0, 160)))].filter(Boolean).join(" ‖ ");
+    const samples = res.map((r, i) => r.status === "fulfilled" && r.value && r.value.sample && r.value.sample.length
+      ? `${urls[i].replace(/^.*\//, "").slice(0, 40)} (${r.value.bytes} bytes) → ${r.value.sample.flat().slice(0, 6).join(" ¦ ")}`
+      : r.status === "fulfilled" && r.value && (r.value.rows || []).length
+        ? `${urls[i].replace(/^.*\//, "").slice(0, 30)} trae otros equipos: ${r.value.rows.slice(0, 3).map((x) => `${x.date} ${x.a} - ${x.b}`).join(" / ")}` : null).filter(Boolean).join(" ‖ ");
+    (DATA.warnings ||= []).push(`Próximos partidos: AnnaBet no mostró partidos por jugar de esta liga. Fuentes: ${info}.${hints ? " Pistas: " + hints : ""}${samples ? " Muestra: " + samples : ""}`);
+  }
+  if (added && AUTO_DATE) $("#date").value = pickDefaultDate();
+  render();
+}
+
 // ---------- carga ----------
 async function load(keepDate, retried) {
   const league = $("#league").value;
   const my = ++reqId;
+  if (!keepDate) AUTO_DATE = true;
   const btn = $("#load");
   btn.disabled = true; btn.textContent = "Cargando…";
   const lname = $("#league").selectedOptions[0]?.textContent || league;
@@ -459,9 +548,11 @@ async function load(keepDate, retried) {
   }
   if (DATA && my === reqId) {
     PREV = null;
+    autoNight();
     if (!keepDate || !gameDates().includes($("#date").value)) $("#date").value = pickDefaultDate();
     render();
     loadPrev(my);
+    loadUpcoming(my);
   }
 }
 
@@ -471,10 +562,14 @@ async function loadLeagues() {
   try {
     const r = await fetch("/api/hockey?part=leagues");
     const data = await r.json();
-    if (data.leagues && data.leagues.length) {
-      sel.innerHTML = data.leagues.map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join("");
-    }
-  } catch {}
+    let list = data.leagues || [];
+    // lista completa de AnnaBet: se guarda; si AnnaBet no respondió, se usa la última lista completa guardada
+    if (data.source === "annabet" && list.length > 20) LS.set("hockey-radar:leagues", JSON.stringify(list));
+    else { try { const old = JSON.parse(LS.get("hockey-radar:leagues") || "null"); if (old && old.length > list.length) list = old; } catch {} }
+    if (list.length) sel.innerHTML = list.map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join("");
+  } catch {
+    try { const old = JSON.parse(LS.get("hockey-radar:leagues") || "null"); if (old && old.length) sel.innerHTML = old.map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join(""); } catch {}
+  }
   if (![...sel.options].some((o) => o.value === saved)) sel.insertAdjacentHTML("afterbegin", `<option value="${esc(saved)}">${esc(saved.replace(/^serie_\d+_/, "").replace(/_/g, " "))}</option>`);
   sel.value = saved;
   addCustomOption();
@@ -500,10 +595,14 @@ $("#league").addEventListener("change", () => {
   }
   LS.set("hockey-radar:league", sel.value); $("#q").value = ""; load(false);
 });
-$("#load").addEventListener("click", () => load(true));
-$("#date").addEventListener("change", () => DATA && render());
-$("#prev").addEventListener("click", () => shift(-1));
-$("#next").addEventListener("click", () => shift(1));
+// Si la liga elegida no es la que está cargada, se carga la nueva desde cero
+$("#load").addEventListener("click", () => load(!(DATA && DATA.league !== $("#league").value)));
+// Algunos navegadores no avisan "change" al elegir escribiendo: se revisa también al soltar la lista
+$("#league").addEventListener("blur", () => { const v = $("#league").value; if (v !== "__custom" && DATA && DATA.league !== v && !$("#load").disabled) { LS.set(LSKEY, v); $("#q").value = ""; load(false); } });
+$("#date").addEventListener("change", () => { AUTO_DATE = false; DATA && render(); });
+$("#night").addEventListener("change", () => { NIGHT_SET = true; LS.set("hockey-radar:night", $("#night").checked ? "1" : "0"); DATA && render(); });
+$("#prev").addEventListener("click", () => { AUTO_DATE = false; shift(-1); });
+$("#next").addEventListener("click", () => { AUTO_DATE = false; shift(1); });
 $("#q").addEventListener("input", () => DATA && render());
 $("#hot").addEventListener("change", () => DATA && render());
 $("#date").value = isoOf(new Date());
