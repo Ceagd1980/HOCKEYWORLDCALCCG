@@ -100,7 +100,14 @@ select{font:600 15px "Barlow Semi Condensed";background:var(--panel);color:var(-
 .flame{font:700 14px Oswald;padding:1px 8px;border-radius:12px;background:#15344a;color:var(--amber);white-space:nowrap}
 .flame.hot{background:var(--amber);color:#1a1300}
 .game.hot{border-color:var(--amber)}
+.fr{font:700 12px Oswald;white-space:nowrap;display:inline-block;padding:0 5px;border-radius:4px;margin-left:6px;vertical-align:3px;cursor:help;background:#2a3263;color:var(--dim)}
+.fr.pos{background:#173d2a;color:var(--win)}.fr.neg{background:#45191d;color:var(--loss)}
+.final.hit{background:#0f2a1c}.final.miss{background:#2e1216}
+.mark{font:700 18px Oswald;margin-left:6px}
 .final{color:var(--text);font-weight:700}
+.final.okc{color:var(--win)}.final.badc{color:var(--loss)}
+.finalbox.hit{border-left-color:var(--win);background:#0f2a1c}.finalbox.miss{border-left-color:var(--loss);background:#2e1216}
+.game.hot{box-shadow:0 0 0 1px var(--amber)}
 .odds{color:var(--dim)}
 .calc h4{margin:8px 0 3px;font:600 13px "Barlow Semi Condensed";color:var(--dim)}
 .calc h4:first-child{margin-top:0}
@@ -140,7 +147,8 @@ select{font:600 15px "Barlow Semi Condensed";background:var(--panel);color:var(-
   <p>Datos: AnnaBet.com (posiciones general, casa y fuera). El local se mide con su tabla general y su tabla en casa (LL); la visita con su tabla general y su tabla fuera (VV). Récord G-GP-PP-P = ganados en 60 min · ganados en prórroga/penales · perdidos en prórroga/penales · perdidos en 60 min. GF = goles a favor por partido, GC = goles en contra por partido.</p>
   <p>% ganador: (ganados + ganados en prórroga) ÷ jugados. % 60': ganados en tiempo regular ÷ jugados. PPG: puntos ÷ jugados (puntos de la tabla de la liga).</p>
   <p>1X2 (60 minutos): Local = (ganados local + perdidos visita) ÷ partidos de ambos. Empate = (partidos a prórroga del local + de la visita) ÷ partidos de ambos. Visita = (ganados visita + perdidos local) ÷ partidos de ambos. Ganador (con prórroga): Local = (ganados + ganados OT local + perdidos + perdidos OT visita) ÷ partidos de ambos; Visita al revés.</p>
-  <p>🔥 Confianza: probabilidad del favorito para ganar el partido (con prórroga), promedio entre General y LL/VV. Se ordenan de mayor a menor; el filtro 🔥 +55% deja solo los que pasan de 55%.</p>
+  <p>🔥 Confianza: probabilidad del favorito para ganar el partido (con prórroga), promedio entre General y LL/VV. Se ordenan de mayor a menor; el filtro 🔥 +55% deja solo los que pasan de 55%; desde 70% la llama y la tarjeta se resaltan. En partidos jugados: marcador en verde con ✓ si ganó el favorito, en rojo con ✗ si no.</p>
+  <p>FR = fuerza relativa: de los últimos 5 partidos del equipo en la liga (antes de la fecha del juego), +1 por victoria (incluida prórroga/penales) y −1 por derrota. Positivo = viene en racha ganadora.</p>
   <p>Goles: Cruzado → Local = (GF local + GC visita)/2, Visita = (GF visita + GC local)/2, Total = suma. Suma anotados → GF local + GF visita. Líneas de referencia 5.5 y 6.5.</p>
   <p>Hándicap: A → GF local − GF visita. B local → GF local − GC visita. B visita → GF visita − GC local. Positivo = ese equipo es favorito por esa cantidad de goles (puck line ±1.5).</p>
   <p>Inicio de temporada: si un equipo tiene menos de 5 partidos, el partido se calcula con la tabla de la temporada anterior (se indica en la tarjeta).</p>
@@ -203,12 +211,31 @@ const ou = (t) => (t == null ? "" : `<div class="sub">${t > 5.5 ? "Over" : "Unde
 
 // ---------- tarjeta ----------
 const rec = (x) => (x ? `${x.w}-${x.otw || 0}-${x.otl || 0}-${x.l}${x.d ? ` (E ${x.d})` : ""}` : "—");
-function teamRow(name, side, g) {
+// Fuerza relativa: últimos 5 partidos, +1 por victoria y −1 por derrota (empate 0)
+function frHtml(f) {
+  if (!f || f.fr == null || !f.last || !f.last.length) return "";
+  const det = f.last.map((x) => x.wl + (x.score ? " " + x.score : "") + (x.date ? " (" + x.date.slice(5).split("-").reverse().join("/") + ")" : "")).join(", ");
+  const tip = `Fuerza relativa (últimos ${f.last.length}): ${f.last.map((x) => x.wl).join(" ")} → ${det}`;
+  return `<span class="fr ${f.fr > 0 ? "pos" : f.fr < 0 ? "neg" : ""}" title="${esc(tip)}">FR ${f.fr > 0 ? "+" : ""}${f.fr}</span>`;
+}
+// FR con los resultados de la propia liga (AnnaBet): últimos 5 partidos antes de la fecha del juego
+function frOf(k, date) {
+  if (!k || !date) return null;
+  const last = (DATA.games || []).filter((x) => x.score && x.date < date && (x.homeKey === k || x.awayKey === k))
+    .sort((a, b) => a.date.localeCompare(b.date)).slice(-5)
+    .map((x) => {
+      const home = x.homeKey === k, [h, a] = x.score;
+      const wl = h === a ? "T" : (h > a) === home ? "W" : "L";
+      return { wl, date: x.date, score: `${home ? h : a}-${home ? a : h}${x.ot ? " " + x.ot : ""}` };
+    });
+  return last.length ? { fr: last.reduce((n, x) => n + (x.wl === "W" ? 1 : x.wl === "L" ? -1 : 0), 0), last } : null;
+}
+function teamRow(name, side, g, form) {
   const cls = side === "home" ? "h" : "a";
   const pos = g ? `${g.pos}º` : "—";
   return `<div class="team">
     <span class="tag ${cls}">${side === "home" ? "LOCAL" : "VISITA"}</span>
-    <span class="name">${esc(name)}</span>
+    <span class="name">${esc(name)}${frHtml(form)}</span>
     <span class="info"><span class="pos">${pos}</span><span>${pctTxt(winp(g))}</span>${g ? `<span class="sub">${rec(g)}</span>` : ""}</span>
   </div>`;
 }
@@ -287,7 +314,8 @@ function confidence(Lg, Ls, Vg, Vs) {
   const h = xs.reduce((a, x) => a + x.h, 0) / xs.length, a = xs.reduce((a2, x) => a2 + x.a, 0) / xs.length;
   return h >= a ? { side: "Local", p: h } : { side: "Visita", p: a };
 }
-const HOT = 0.55;
+const HOT = 0.55; // filtro 🔥 +55%
+const HI = 0.70;  // desde 70% la llama se resalta
 
 // Resultado real vs. cálculos (partidos ya jugados)
 function finalBox(g, c, Lg, Ls, Vg, Vs) {
@@ -303,7 +331,8 @@ function finalBox(g, c, Lg, Ls, Vg, Vs) {
   parts.push(`1X2 60': <b>${g.ot ? `X (empate, definido en ${g.ot === "SO" ? "penales" : "prórroga"})` : winner === "Local" ? "1 Local" : "2 Visita"}</b>`);
   if (t) parts.push(`Goles reales <b>${tot}</b> vs proyectado ${f2(t.cross)} (${tot > t.cross ? "más" : "menos"}) · ${tot > 5.5 ? "Over" : "Under"} 5.5`);
   parts.push(`Diferencia real: ${h - a > 0 ? "+" : ""}${h - a} local${t ? ` (proyectado ${signed2(t.hA)})` : ""}`);
-  return `<div class="finalbox">${parts.map((p) => `<div>${p}</div>`).join("")}</div>`;
+  const cls = c && winner ? (c.side === winner ? " hit" : " miss") : "";
+  return `<div class="finalbox${cls}">${parts.map((p) => `<div>${p}</div>`).join("")}</div>`;
 }
 
 // Tablas a usar en el partido: al inicio de temporada (menos de minGp partidos) se usa la temporada anterior
@@ -365,19 +394,21 @@ function render() {
   } else {
     el.innerHTML = `<h2 class="day">${esc(DATA.title)} · ${dayTitle(day)}</h2>` + list.map((g) => {
       const [Lg, Ls, Vg, Vs] = g._tb.t;
-      const fin = g.score ? `<span class="final">Final ${g.score[0]}–${g.score[1]}${g.ot ? ` ${g.ot}` : ""}</span>` : "";
+      const c = g._conf;
+      const wn = g.score ? (g.score[0] > g.score[1] ? "Local" : g.score[1] > g.score[0] ? "Visita" : null) : null;
+      const hit = c && wn ? c.side === wn : null;
+      const fin = g.score ? `<span class="final${hit == null ? "" : hit ? " okc" : " badc"}">Final ${g.score[0]}–${g.score[1]}${g.ot ? ` ${g.ot}` : ""}${hit == null ? "" : `<span class="mark">${hit ? "✓" : "✗"}</span>`}</span>` : "";
       const hc = g.hc != null ? ` · HC ${g.hc > 0 ? "+" : ""}${g.hc}` : "";
       const odds = g.odds ? `<span class="odds" title="Cuotas 1 / X / 2 de AnnaBet">Cuotas ${g.odds.join(" · ")}${hc}</span>` : "";
-      const c = g._conf;
-      const hot = c && c.p > HOT;
-      const flame = c ? `<span class="flame${hot ? " hot" : ""}" title="Confianza: probabilidad del favorito de ganar (con prórroga), promedio General y LL/VV">🔥 ${c.side} ${(c.p * 100).toFixed(0)}%</span>` : "";
+      const hot = c && c.p >= HI;
+      const flame = c ? `<span class="flame${hot ? " hot" : ""}" title="Confianza: probabilidad del favorito de ganar (con prórroga), promedio General y LL/VV. Resaltado desde 70%">🔥 ${c.side} ${(c.p * 100).toFixed(0)}%</span>` : "";
       const prevNote = g._tb.prev ? `<div class="meta prevnote">📅 Inicio de temporada: calculado con la temporada ${esc(PREV.label)}</div>` : "";
       return `<article class="game${hot ? " hot" : ""}">
         <div class="meta"><span>${esc(g.time || (g.score ? "" : "Sin hora (AnnaBet solo da la fecha)"))} ${fin}</span>${flame}</div>
         ${g.date !== day ? `<div class="meta night">🌙 AnnaBet lo pone el ${dayTitle(g.date)} (hora UTC): si es de noche, en Ecuador se juega el ${dayTitle(day)}</div>` : ""}
         ${odds ? `<div class="meta">${odds}</div>` : ""}
         ${prevNote}
-        <div class="teams">${teamRow(g.home, "home", Lg)}${teamRow(g.away, "away", Vg)}</div>
+        <div class="teams">${teamRow(g.home, "home", Lg, frOf(g.homeKey, g.date))}${teamRow(g.away, "away", Vg, frOf(g.awayKey, g.date))}</div>
         ${finalBox(g, c, Lg, Ls, Vg, Vs)}
         <div class="boxes">${box(g.home, "home", Lg, Ls)}${box(g.away, "away", Vg, Vs)}</div>
         ${calc(Lg, Ls, Vg, Vs)}
